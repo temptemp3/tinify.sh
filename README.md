@@ -1,0 +1,2 @@
+# tinify.sh
+tinify images
