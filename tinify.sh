@@ -1,51 +1,79 @@
 #!/bin/bash
 ## tinify
 ## - tinifies images
-## version 0.0.1 - initial
+## version 0.0.2 - use local cache
 ##################################################
-. ${SH2}/error.sh 		# error handling 
-. ${SH2}/aliases/commands.sh	# commands
-. ${SH2}/cecho.sh		# colored echo
+. ${SH2}/error.sh 		 # error handling 
+. ${SH2}/aliases/commands.sh	 # commands
+. ${SH2}/cecho.sh		 # colored echo
+#-------------------------------------------------
+. ${SH2}/cache.sh		 # caching
+cache=./cache/tinify		 # set cache path
+test -d "${cache}" || {		 # init cache path
+ mkdir -pv "${cache}"		 #
+}				 #
+#-------------------------------------------------
+. ${SH2}/sanitize.sh 2>/dev/null # sanitization
 ##################################################
+car() {
+ echo ${1}
+}
 file-info() { { local infile ; infile="${1}" ; }
  test "${infile}"
  file ${infile}
  du -d 0 -b ${infile}
 }
-tinify-api-shrink() { { local infile ; infile="${1}" ; }
-  curl https://api.tinify.com/shrink \
-  --user "api:${API_KEY}" \
-  --dump-header header \
-  --data-binary "@${infile}" \
-  --silent
-}
-tinify-api-output() { { local inurl ; inurl="${1}" ; }
-  curl ${inurl} \
-  --user "api:${API_KEY}" \
-  --dump-header header \
-  --output optimized.jpg \
-  --silent
-}
-tinify-api() {
- commands
-}
 tinify-image() { { local infile ; infile="${1}" ; }
+ shrink-image() { # returns response to compression
+   shrink-image-payload() {
+    cecho green "uploading file for compression ..."
+    {
+      tinify-api-shrink ${infile}
+    } 
+   }
+   {
+     cache \
+     "${cache}/${FUNCNAME}-${candidate_key}" \
+     "${FUNCNAME}-payload"
+   }
+ }
+ setup-compression() {
+   cecho green setting up compression ...
+   compression_count=$( cat header | grep -e 'Compression-Count' | cut '-d:' '-f2' )
+   compression_output_url=$( cat response | jq '.output.url' | cut '-d"' '-f2' )
+   compression_in_size=$( cat response | jq '.input.size' | cut '-d"' '-f2' )
+   compression_in_type=$( cat response | jq '.input.type' | cut '-d"' '-f2' )
+   compression_out_size=$( cat response | jq '.output.size' | cut '-d"' '-f2' )
+   compression_out_type=$( cat response | jq '.output.type' | cut '-d"' '-f2' )
+   compression_ratio=$( cat response | jq '.output.ratio' | cut '-d"' '-f2' )
+   compression_size_diff=$(( ${compression_out_size} - ${compression_in_size} ))
+   cecho green compression setup
+ }
+ {
+   local compression_count
+   local compression_output_url
+   local compression_in_type
+   local compression_out_size
+   local compression_out_type
+   local compression_ratio
+   local compression_size_diff
+   local compression_count
+ }
+ {
+   local candidate_key
+   candidate_key=$( sanitize $( sha1sum ${infile} ) )
+   cecho yellow candidate_key: ${candidate_key}
+ }
  test -f "${infile}" || { 
    {
      echo file missing 
    } 1>&2
    false
  }
- cecho green "uploading file for compression ..."
- {
-   tinify-api-shrink ${infile}
+ { # > response
+   shrink-image 
  } | tee response 
- compression_count=$( cat header | grep -e 'Compression-Count' | cut '-d:' '-f2' )
- compression_output_url=$( cat response | jq '.output.url' | cut '-d"' '-f2' )
- compression_size_in=$( cat response | jq '.input.size' | cut '-d"' '-f2' )
- compression_size_out=$( cat response | jq '.output.size' | cut '-d"' '-f2' )
- compression_size_diff=$(( ${compression_size_out} - ${compression_size_in} ))
- compression_ration=$( cat response | jq '.output.ratio' | cut '-d"' '-f2' )
+ setup-compression
  cecho green "downloading compression output ..."
  {
    tinify-api-output ${compression_output_url}
@@ -54,6 +82,7 @@ tinify-image() { { local infile ; infile="${1}" ; }
  cecho yellow compression_count: ${compression_count}
  cecho yellow BEFORE $( file-info ${infile} )
  cecho yellow AFTER $( file-info optimized.jpg )
+ cecho yellow compression_ratio: ${compression_ratio}
  true
 }
 tinify() {
@@ -64,6 +93,7 @@ tinify() {
    false
  }
  test "${API_KEY}"
+ . $( dirname ${0} )/${FUNCNAME}-api.sh 
  commands
 }
 ##################################################
